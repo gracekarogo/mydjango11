@@ -1,6 +1,13 @@
-from django.shortcuts import render, redirect
-from hospitalapp.models import Member, Contacts, Users
+import json
 
+import requests
+from django.http import HttpResponse
+from django.shortcuts import render, redirect
+from requests.auth import HTTPBasicAuth
+
+from hospitalapp.credentials import MpesaAccessToken, LipanaMpesaPpassword
+from hospitalapp.models import Member, Contacts, Users,ImageModel
+from hospitalapp.forms import ImageUploadForm
 # Create your views here.
 def index(request):
     if request.method == 'POST':
@@ -15,17 +22,33 @@ def inner(request):
 
 def register(request):
     if request.method == 'POST':
-        member = Member(username=request.POST["username"],email=request.POST['email'],password=request.POST['password'])
+        member = Member(username=request.POST["username"], email=request.POST['email'], password=request.POST['password'])
         member.save()
-        return redirect('/register')
+        return redirect('/login')
     else:
-        return render(request, 'register.html')
+        return render(request, 'Register.html')
 
 def login(request):
     return render(request, 'Login.html')
 
-def upload(request):
-    return render(request, 'Upload.html')
+def upload_image(request):
+    if request.method == 'POST':
+        form = ImageUploadForm(request.POST, request.FILES)
+        if form.is_valid():
+            form.save()
+            return redirect('/showimage')
+    else:
+        form = ImageUploadForm()
+    return render(request, 'uploadimage.html', {'form': form})
+
+def show_image(request):
+    images = ImageModel.objects.all()
+    return render(request, 'ahowimage.html', {'images': images})
+
+def imagedelete(request, id):
+    image = ImageModel.objects.get(id=id)
+    image.delete()
+    return redirect('/showimage')
 
 def details(request):
     details = Contacts.objects.all()
@@ -34,3 +57,55 @@ def details(request):
 def users(request):
     users = Users.objects.all()
     return render(request, 'users.html',{'users':users})
+
+def adminhome(request):
+    if request.method=='POST':
+        if Member.objects.filter(username=request.POST['username'],
+                                 password=request.POST['password']).exists():
+            member = Member.objects.get(username=request.POST['username'], password=request.POST['password'])
+            return render(request, 'adminhome.html', {'member': member})
+        else:
+            return render(request,'Login.html')
+    else:
+            return render(request,'Login.html')
+
+def token(request):
+    consumer_key = '77bgGpmlOxlgJu6oEXhEgUgnu0j2WYxA'
+    consumer_secret = 'viM8ejHgtEmtPTHd'
+    api_URL = 'https://sandbox.safaricom.co.ke/oauth/v1/generate?grant_type=client_credentials'
+
+    r = requests.get(api_URL, auth=HTTPBasicAuth(
+        consumer_key, consumer_secret))
+    mpesa_access_token = json.loads(r.text)
+    validated_mpesa_access_token = mpesa_access_token["access_token"]
+
+    return render(request, 'token.html', {"token":validated_mpesa_access_token})
+
+def pay(request):
+   return render(request, 'pay.html')
+
+
+
+def stk(request):
+    if request.method =="POST":
+        phone = request.POST['phone']
+        amount = request.POST['amount']
+        access_token = MpesaAccessToken.validated_mpesa_access_token
+        api_url = "https://sandbox.safaricom.co.ke/mpesa/stkpush/v1/processrequest"
+        headers = {"Authorization": "Bearer %s" % access_token}
+        request = {
+            "BusinessShortCode": LipanaMpesaPpassword.Business_short_code,
+            "Password": LipanaMpesaPpassword.decode_password,
+            "Timestamp": LipanaMpesaPpassword.lipa_time,
+            "TransactionType": "CustomerPayBillOnline",
+            "Amount": amount,
+            "PartyA": phone,
+            "PartyB": LipanaMpesaPpassword.Business_short_code,
+            "PhoneNumber": phone,
+            "CallBackURL": "https://sandbox.safaricom.co.ke/mpesa/",
+            "AccountReference": "Apen Softwares",
+            "TransactionDesc": "Web Development Charges"
+        }
+        response = requests.post(api_url, json=request, headers=headers)
+        return HttpResponse(response)
+
